@@ -65,7 +65,7 @@ int executor(std::vector<std::string> command, std::vector<std::string> bkend_ta
         back_end = bkend_target[0];
         tar_arch = bkend_target[1];
         std::vector<std::string> prefix;
-        if (bkend_target[3] != "is_link_only") {
+        if (bkend_target[3] != "is_link_only" && back_end != "gaudi") {
             prefix.push_back("-x");
             prefix.push_back(back_end);
             prefix.push_back("--offload-arch=" + tar_arch);

@@ -54,6 +54,11 @@ inline constexpr auto gpu_selector_v =
 inline constexpr auto accelerator_selector_v =
     device_selector{[](const device& dev) -> int { return dev.is_accelerator() ? 1 : -1; }};
 
+#if PARASDEVICE == 3
+inline constexpr auto default_selector_v = device_selector{[](const device& dev) -> int {
+    return dev.get_backend() == backend::gaudi ? 4 : -1;
+}};
+#else
 inline constexpr auto default_selector_v = device_selector{[](const device& dev) -> int {
 #if PARASDEVICE
     return dev.is_gpu()   ? 3
@@ -67,6 +72,7 @@ inline constexpr auto default_selector_v = device_selector{[](const device& dev)
            dev.is_accelerator() ? 1
                                 : -1;
 }};
+#endif
 
 inline auto aspect_selector(const std::vector<aspect>& aspectList,
                             const std::vector<aspect>& denyList = {}) {

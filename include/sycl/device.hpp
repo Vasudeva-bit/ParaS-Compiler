@@ -385,7 +385,7 @@ struct extensions {
 
 } // namespace info
 
-enum class backend { cuda, host, hip };
+enum class backend { cuda, host, hip, gaudi };
 
 class queue;
 
@@ -422,6 +422,8 @@ public:
             return backend::cuda;
         if (name_ == "hip")
             return backend::hip;
+        if (name_ == "gaudi")
+            return backend::gaudi;
         return backend::host;
     }
 
@@ -516,7 +518,7 @@ public:
 
     bool operator==(const device& rhs) const noexcept {
         return native_id_ == rhs.native_id_ && is_cpu_ == rhs.is_cpu_ && is_gpu_ == rhs.is_gpu_ &&
-               is_accelerator_ == rhs.is_accelerator_;
+               is_accelerator_ == rhs.is_accelerator_ && get_backend() == rhs.get_backend();
     }
 
     bool operator!=(const device& rhs) const noexcept { return !(*this == rhs); }
@@ -614,14 +616,17 @@ private:
 
 inline std::vector<platform> platform::get_platforms() {
     std::vector<platform> platforms;
-    const auto gpus = device::get_devices(info::device_type::gpu);
+    const auto gpus = device::get_devices(info::device_type::all);
     bool has_cuda = false;
     bool has_hip = false;
+    bool has_gaudi = false;
     for (const auto& gpu : gpus) {
         if (gpu.get_backend() == backend::cuda) {
             has_cuda = true;
         } else if (gpu.get_backend() == backend::hip) {
             has_hip = true;
+        } else if (gpu.get_backend() == backend::gaudi) {
+            has_gaudi = true;
         }
     }
     if (has_cuda) {
@@ -630,20 +635,29 @@ inline std::vector<platform> platform::get_platforms() {
     if (has_hip) {
         platforms.emplace_back("hip");
     }
+    if (has_gaudi) {
+        platforms.emplace_back("gaudi");
+    }
     platforms.emplace_back("host");
     return platforms;
 }
 
 inline std::vector<sycl::device> platform::get_devices(sycl::info::device_type type) const {
-    if (name_ == "cuda" || name_ == "hip") {
-        if (type == sycl::info::device_type::gpu || type == sycl::info::device_type::all) {
-            const auto all_gpus = sycl::device::get_devices(sycl::info::device_type::gpu);
+    if (name_ == "cuda" || name_ == "hip" || name_ == "gaudi") {
+        if (type == sycl::info::device_type::gpu || type == sycl::info::device_type::accelerator ||
+            type == sycl::info::device_type::all) {
+            const auto all_devices = sycl::device::get_devices(sycl::info::device_type::all);
             std::vector<sycl::device> platform_devices;
-            const auto requested_backend =
-                name_ == "cuda" ? sycl::backend::cuda : sycl::backend::hip;
-            for (const auto& gpu : all_gpus) {
-                if (gpu.get_backend() == requested_backend) {
-                    platform_devices.push_back(gpu);
+            const auto requested_backend = name_ == "cuda"   ? sycl::backend::cuda
+                                           : name_ == "hip" ? sycl::backend::hip
+                                                             : sycl::backend::gaudi;
+            for (const auto& dev : all_devices) {
+                if (dev.get_backend() == requested_backend &&
+                    (type == sycl::info::device_type::all ||
+                     (requested_backend == sycl::backend::gaudi
+                          ? type == sycl::info::device_type::accelerator
+                          : type == sycl::info::device_type::gpu))) {
+                    platform_devices.push_back(dev);
                 }
             }
             return platform_devices;
@@ -1148,6 +1162,11 @@ struct backend_return<backend::host, device> {
 };
 
 template <>
+struct backend_return<backend::gaudi, device> {
+    using type = int;
+};
+
+template <>
 struct backend_return<backend::cuda, queue> {
 #if (PARAS_CUDA_BACKEND)
     using type = CUstream_st*;
@@ -1184,6 +1203,12 @@ template <>
 inline int get_native<backend::host, device>(const device& dev) {
     return dev.get_native_id();
 }
+
+template <>
+inline int get_native<backend::gaudi, device>(const device& dev) {
+    return dev.get_native_id();
+}
+
 } // namespace sycl
 
 namespace std {
@@ -1194,6 +1219,8 @@ struct hash<sycl::device> {
         h ^= std::hash<bool>{}(d.is_cpu()) + 0x9e3779b9 + (h << 6) + (h >> 2);
         h ^= std::hash<bool>{}(d.is_gpu()) + 0x9e3779b9 + (h << 6) + (h >> 2);
         h ^= std::hash<bool>{}(d.is_accelerator()) + 0x9e3779b9 + (h << 6) + (h >> 2);
+        h ^= std::hash<int>{}(static_cast<int>(d.get_backend())) + 0x9e3779b9 + (h << 6) +
+             (h >> 2);
         return h;
     }
 };

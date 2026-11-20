@@ -28,6 +28,8 @@
 #include <cuda_runtime.h>
 #elif (PARAS_HIP_BACKEND)
 #include <hip/hip_runtime.h>
+// #elif (PARAS_GAUDI_BACKEND)
+// #include "synapse_runtime.hpp" // via accelerator selector logic?
 #endif
 
 template <typename Func>

@@ -66,6 +66,10 @@ inline sycl::device select_device_with_selector(const SelectorV& selector_v) {
 
     for (auto& dev : candidates) {
         int score = selector_v(dev);
+#if PARASDEVICE == 3
+        if (dev.get_backend() != sycl::backend::gaudi)
+            score = std::numeric_limits<int>::min();
+#endif
         if (score > best_score) {
             best_score = score;
             best = &dev;
@@ -92,17 +96,44 @@ inline sycl::device select_device_with_selector(const SelectorV& selector_v) {
         return *best;
     }
 
+    // Does the code changes for gaudi 2 support, i.e. v0.1, follow accelerator_selector_v?
+    // if constexpr (std::is_same_v<std::decay_t<SelectorV>,
+    //                              std::decay_t<decltype(sycl::accelerator_selector_v)>>) {
+    //     if constexpr (has_flag) {
+    //         paras_selector_error("accelerator_selector_v used but -parasdevice flag is present");
+    //     }
+    //     return best ? *best : sycl::device{};
+    // }
+
+#if PARASDEVICE == 3
+    if (!best) {
+        return sycl::device(device_ctor_tag{}, "No Intel Gaudi device present", "Intel Gaudi", "",
+                            "", 0, 0, 0, sycl::info::local_mem_type::none, false, false, true, -1,
+                            false);
+    }
+#endif
+
     return best ? *best : sycl::device{};
 }
 
 inline sycl::device select_device_no_selector() {
 #if PARASDEVICE
+#if PARASDEVICE == 3
+    auto devices = sycl::device::get_devices(sycl::info::device_type::all);
+    for (const auto& dev : devices)
+        if (dev.get_backend() == sycl::backend::gaudi)
+            return dev;
+    return sycl::device(device_ctor_tag{}, "No Intel Gaudi device present", "Intel Gaudi", "",
+                        "", 0, 0, 0, sycl::info::local_mem_type::none, false, false, true, -1,
+                        false);
+#else
     auto gpus = sycl::device::get_devices(sycl::info::device_type::gpu);
     if (gpus.empty()) {
         return sycl::device(device_ctor_tag{}, "No GPU present", "", "", "", 0, 0, 0,
                             sycl::info::local_mem_type::none, false, false, false, -1, false);
     }
     return gpus.front();
+#endif
 #else
     return sycl::device{};
 #endif

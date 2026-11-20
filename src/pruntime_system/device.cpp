@@ -120,9 +120,13 @@ device::device(::paras_extension::device_ctor_tag, std::string name, std::string
 }
 
 backend device::get_backend() const noexcept {
+    if (vendor_ == "Intel Gaudi")
+        return backend::gaudi;
     if (!is_gpu_)
         return backend::host;
-    return vendor_ == "AMD" ? backend::hip : backend::cuda;
+    if (vendor_ == "AMD")
+        return backend::hip;
+    return backend::cuda;
 }
 bool device::is_cpu() const noexcept {
     return is_cpu_;
@@ -134,7 +138,13 @@ bool device::is_accelerator() const noexcept {
     return is_accelerator_;
 }
 platform device::get_platform() const {
-    return platform(is_gpu_ ? (vendor_ == "AMD" ? "hip" : "cuda") : "host");
+    if (vendor_ == "Intel Gaudi")
+        return platform("gaudi");
+    if (!is_gpu_)
+        return platform("host");
+    if (vendor_ == "AMD")
+        return platform("hip");
+    return platform("cuda");
 }
 std::vector<device> device::get_devices(info::device_type type) {
     std::vector<device> out;
@@ -146,6 +156,11 @@ std::vector<device> device::get_devices(info::device_type type) {
     if (type == info::device_type::gpu || type == info::device_type::all) {
         auto gpus = ::paras_extension::detect_all_gpus();
         out.insert(out.end(), gpus.begin(), gpus.end());
+    }
+
+    if (type == info::device_type::accelerator || type == info::device_type::all) {
+        auto accelerators = ::paras_extension::detect_gaudi2_accelerators();
+        out.insert(out.end(), accelerators.begin(), accelerators.end());
     }
 
     return out;

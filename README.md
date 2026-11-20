@@ -17,7 +17,7 @@ ParaS (pronounced **paa-ruhs**) is an implementation of the **SYCL 2020** specif
 
 ## Introduction
 
-ParaS is designed to provide a portable SYCL programming environment that allows developers to write code once and execute it across different hardware architectures. The current version supports **CPUs** and **NVIDIA GPUs** execution, with future support planned for additional backends.
+ParaS is designed to provide a portable SYCL programming environment that allows developers to write code once and execute it across different hardware architectures. The current release supports **CPUs** and **NVIDIA GPUs**. A restricted Intel Gaudi 2 preview is available for one-dimensional `float` vector addition.
 
 ---
 
@@ -40,6 +40,8 @@ ParaS is designed to provide a portable SYCL programming environment that allows
 > **Note**
 >
 > The current version of ParaS supports **CPUs** and **NVIDIA GPUs**.
+
+> The Gaudi 2 preview additionally requires an installed SynapseAI SDK and an Intel Gaudi 2 device.
 
 ---
 
@@ -93,6 +95,15 @@ To compile a SYCL source file (for example, `sample1.cpp`):
 ```bash
 parascc -parasdevice cuda:sm_xy sample1.cpp <compiler_flags>
 ```
+
+### For Intel Gaudi 2 (v0.1 preview)
+
+```bash
+parascc -parasdevice gaudi:gaudi2 sample1.cpp <compiler_flags> \
+    -I/usr/include/habanalabs -L/usr/lib/habanalabs -lsynapse
+```
+
+SynapseAI include and library paths depend on the SDK installation. ParaS does not add or link SynapseAI automatically; provide the SDK include path and `libsynapse.so` link flags when building the application. See [Gaudi backend limitations and supported kernel form](docs/GAUDI.md).
 
 > **Note**
 >

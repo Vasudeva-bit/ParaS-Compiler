@@ -350,8 +350,8 @@ std::vector<std::vector<std::string>> parseCommandLineArgs(int argc, const char*
                 std::string backend = value.substr(0, pos);
                 std::string arch = value.substr(pos + 1);
 
-                if (backend != "cuda" && backend != "hip") {
-                    std::cerr << "Error: backend must be 'cuda' or 'hip', got '" << backend
+                if (backend != "cuda" && backend != "hip" && backend != "gaudi") {
+                    std::cerr << "Error: backend must be 'cuda', 'hip', or 'gaudi', got '" << backend
                               << "'\n";
                     exit(1);
                 }
@@ -359,8 +359,18 @@ std::vector<std::vector<std::string>> parseCommandLineArgs(int argc, const char*
                     std::cerr << "Error: architecture part cannot be empty\n";
                     exit(1);
                 }
-                args.push_back(backend == "hip" ? "-DPARASDEVICE=2" : "-DPARASDEVICE=1");
-                args.push_back("-DPARAS_OFFLOAD_ARCH=\"" + arch + "\"");
+                if (backend == "gaudi") {
+                    if (arch != "gaudi2") {
+                        std::cerr << "Error: v0.1 Gaudi backend supports only 'gaudi2', got '"
+                                  << arch << "'\n";
+                        exit(1);
+                    }
+                    args.push_back("-DPARASDEVICE=3");
+                    args.push_back("-DPARAS_GAUDI_BACKEND=1");
+                } else {
+                    args.push_back(backend == "hip" ? "-DPARASDEVICE=2" : "-DPARASDEVICE=1");
+                    args.push_back("-DPARAS_OFFLOAD_ARCH=\"" + arch + "\"");
+                }
                 if (backend == "hip") {
                     bool userSet = false, wave64 = false;
                     for (const std::string& a : args) {
@@ -494,7 +504,7 @@ std::vector<std::vector<std::string>> parseCommandLineArgs(int argc, const char*
     row0.insert(row0.end(), tool_flags.begin(), tool_flags.end());
 
     row0.push_back("--");
-    if (found) {
+    if (found && bkend_target[0] != "gaudi") {
         row0.push_back("-x");
         row0.push_back(bkend_target[0]);
         row0.push_back("--offload-arch=" + bkend_target[1]);
