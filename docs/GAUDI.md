@@ -4,11 +4,11 @@ ParaS v0.1 adds an explicitly identified `gaudi` backend. Invoke it with:
 
 ```bash
 parascc -parasdevice gaudi:gaudi2 source.cpp <compiler_flags> \
-    -I/usr/include/habanalabs -L/usr/lib/habanalabs -lsynapse
+    -I/usr/include/habanalabs -L/usr/lib/habanalabs -lSynapse -Wl,-rpath,/usr/lib/habanalabs
 ```
 
 The Gaudi target is parsed and compiled as ordinary host C++. ParaS does not pass
-CUDA/HIP language or offload flags. The SDK include directory and `libsynapse.so`
+CUDA/HIP language or offload flags. The SDK include directory and `libSynapse.so`
 link option are deliberately supplied by the application build command.
 
 ## Supported kernel

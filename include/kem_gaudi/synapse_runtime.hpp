@@ -52,9 +52,7 @@ inline void check(synStatus status, const char* operation) {
 struct Runtime {
     synDeviceId device{};
     bool device_acquired{false};
-    synStreamHandle h2d{};
-    synStreamHandle compute{};
-    synStreamHandle d2h{};
+    synStreamHandle stream{};
     std::mutex mutex;
 
     Runtime() {
@@ -63,16 +61,10 @@ struct Runtime {
             check(synDeviceAcquireByDeviceType(&device, synDeviceGaudi2),
                   "synDeviceAcquireByDeviceType(Gaudi2)");
             device_acquired = true;
-            check(synStreamCreate(&h2d, device, STREAM_TYPE_COPY_HOST_TO_DEVICE, 0),
-                  "synStreamCreate(H2D)");
-            check(synStreamCreate(&compute, device, STREAM_TYPE_COMPUTE, 0),
-                  "synStreamCreate(compute)");
-            check(synStreamCreate(&d2h, device, STREAM_TYPE_COPY_DEVICE_TO_HOST, 0),
-                  "synStreamCreate(D2H)");
+            check(synStreamCreateGeneric(&stream, device, 0),
+                  "synStreamCreateGeneric");
         } catch (...) {
-            if (d2h) synStreamDestroy(d2h);
-            if (compute) synStreamDestroy(compute);
-            if (h2d) synStreamDestroy(h2d);
+            if (stream) synStreamDestroy(stream);
             if (device_acquired) synDeviceRelease(device);
             synDestroy();
             throw;
@@ -80,9 +72,7 @@ struct Runtime {
     }
 
     ~Runtime() {
-        if (d2h) synStreamDestroy(d2h);
-        if (compute) synStreamDestroy(compute);
-        if (h2d) synStreamDestroy(h2d);
+        if (stream) synStreamDestroy(stream);
         if (device_acquired) synDeviceRelease(device);
         synDestroy();
     }
@@ -109,10 +99,9 @@ inline sycl::event add_f32(std::size_t count, const float* a, const float* b, fl
     std::lock_guard<std::mutex> lock(rt.mutex);
     const std::uint64_t bytes = static_cast<std::uint64_t>(count) * sizeof(float);
     synGraphHandle graph{};
+    synSectionHandle sections[3]{};
     synTensor tensors[3]{};
     synRecipeHandle recipe{};
-    synEventHandle copyDone{};
-    synEventHandle computeDone{};
     void* hostA = nullptr;
     void* hostB = nullptr;
     void* hostC = nullptr;
@@ -120,12 +109,10 @@ inline sycl::event add_f32(std::size_t count, const float* a, const float* b, fl
     std::uint64_t workspaceBytes = 0;
 
     auto cleanup = [&]() {
-        if (rt.h2d) synStreamSynchronize(rt.h2d);
-        if (rt.compute) synStreamSynchronize(rt.compute);
-        if (rt.d2h) synStreamSynchronize(rt.d2h);
-        if (computeDone) synEventDestroy(computeDone);
-        if (copyDone) synEventDestroy(copyDone);
+        if (rt.stream) synStreamSynchronize(rt.stream);
         if (recipe) synRecipeDestroy(recipe);
+        for (synSectionHandle sec : sections)
+            if (sec) synSectionDestroy(sec);
         if (graph) synGraphDestroy(graph);
         for (synTensor tensor : tensors)
             if (tensor) synTensorDestroy(tensor);
@@ -140,26 +127,30 @@ inline sycl::event add_f32(std::size_t count, const float* a, const float* b, fl
 
     try {
         check(synGraphCreate(&graph, synDeviceGaudi2), "synGraphCreate(Gaudi2)");
-        unsigned sizes[SYN_MAX_TENSOR_DIM] = {static_cast<unsigned>(count), 1, 1, 1};
-        const char* names[] = {"paras_add_a", "paras_add_b", "paras_add_c"};
+        const char* names[3] = {"A", "B", "C"};
         for (unsigned i = 0; i < 3; ++i) {
+            check(synSectionCreate(&sections[i], 0, graph), "synSectionCreate");
+            check(synSectionSetPersistent(sections[i], true), "synSectionSetPersistent");
             synTensorDescriptor desc{};
             desc.m_dataType = syn_type_float;
-            desc.m_dims = 4;
+            desc.m_dims = 1;
+            desc.m_sizes[0] = static_cast<unsigned>(count);
             desc.m_name = names[i];
-            for (unsigned d = 0; d < 4; ++d) {
-                desc.m_sizes[d] = sizes[d];
-                desc.m_minSizes[d] = sizes[d];
-            }
-            check(synTensorCreate(&tensors[i], &desc, nullptr, 0), "synTensorCreate");
+            desc.m_tensorType = DATA_TENSOR;
+            check(synTensorCreate(&tensors[i], &desc, sections[i], 0), "synTensorCreate");
         }
         synTensor inputs[] = {tensors[0], tensors[1]};
         synTensor outputs[] = {tensors[2]};
         check(synNodeCreate(graph, inputs, outputs, 2, 1, nullptr, 0, "add_fwd_f32",
-                            "ParaS vector add", nullptr, nullptr),
+                            "paras_vector_add", nullptr, nullptr),
               "synNodeCreate(add_fwd_f32)");
         check(synGraphCompile(&recipe, graph, "paras_vector_add_f32", nullptr),
               "synGraphCompile");
+
+        check(synWorkspaceGetSize(&workspaceBytes, recipe), "synWorkspaceGetSize");
+
+        uint64_t ids[3] = {0};
+        check(synTensorRetrieveIds(recipe, names, ids, 3), "synTensorRetrieveIds");
 
         check(synHostMalloc(rt.device, bytes, 0, &hostA), "synHostMalloc(input A)");
         check(synHostMalloc(rt.device, bytes, 0, &hostB), "synHostMalloc(input B)");
@@ -170,7 +161,6 @@ inline sycl::event add_f32(std::size_t count, const float* a, const float* b, fl
         check(synDeviceMalloc(rt.device, bytes, 0, 0, &deviceA), "synDeviceMalloc(input A)");
         check(synDeviceMalloc(rt.device, bytes, 0, 0, &deviceB), "synDeviceMalloc(input B)");
         check(synDeviceMalloc(rt.device, bytes, 0, 0, &deviceC), "synDeviceMalloc(output)");
-        check(synWorkspaceGetSize(&workspaceBytes, recipe), "synWorkspaceGetSize");
         if (workspaceBytes)
             check(synDeviceMalloc(rt.device, workspaceBytes, 0, 0, &workspace),
                   "synDeviceMalloc(workspace)");
@@ -178,27 +168,23 @@ inline sycl::event add_f32(std::size_t count, const float* a, const float* b, fl
         synLaunchTensorInfo launchTensors[3]{};
         const std::uint64_t addresses[] = {deviceA, deviceB, deviceC};
         for (unsigned i = 0; i < 3; ++i) {
-            launchTensors[i].pTensorAddress = addresses[i];
             launchTensors[i].tensorName = names[i];
+            launchTensors[i].pTensorAddress = addresses[i];
             launchTensors[i].tensorType = DATA_TENSOR;
+            launchTensors[i].tensorId = ids[i];
+            launchTensors[i].tensorSize[0] = static_cast<unsigned>(count);
         }
-        check(synEventCreate(&copyDone, rt.device, 0), "synEventCreate(copy)");
-        check(synEventCreate(&computeDone, rt.device, 0), "synEventCreate(compute)");
-        check(synMemCopyAsync(rt.h2d, reinterpret_cast<std::uint64_t>(hostA), bytes, deviceA,
-                              HOST_TO_DRAM),
+
+        check(synMemCopyAsync(rt.stream, (uint64_t)(uintptr_t)hostA, bytes, deviceA, HOST_TO_DRAM),
               "synMemCopyAsync(input A)");
-        check(synMemCopyAsync(rt.h2d, reinterpret_cast<std::uint64_t>(hostB), bytes, deviceB,
-                              HOST_TO_DRAM),
+        check(synMemCopyAsync(rt.stream, (uint64_t)(uintptr_t)hostB, bytes, deviceB, HOST_TO_DRAM),
               "synMemCopyAsync(input B)");
-        check(synEventRecord(copyDone, rt.h2d), "synEventRecord(copy)");
-        check(synStreamWaitEvent(rt.compute, copyDone, 0), "synStreamWaitEvent(copy)");
-        check(synLaunch(rt.compute, launchTensors, 3, workspace, recipe), "synLaunch");
-        check(synEventRecord(computeDone, rt.compute), "synEventRecord(compute)");
-        check(synStreamWaitEvent(rt.d2h, computeDone, 0), "synStreamWaitEvent(compute)");
-        check(synMemCopyAsync(rt.d2h, deviceC, bytes,
-                              reinterpret_cast<std::uint64_t>(hostC), DRAM_TO_HOST),
+        check(synLaunch(rt.stream, launchTensors, 3, workspace, recipe, 0),
+              "synLaunch");
+        check(synMemCopyAsync(rt.stream, deviceC, bytes, (uint64_t)(uintptr_t)hostC, DRAM_TO_HOST),
               "synMemCopyAsync(output)");
-        check(synStreamSynchronize(rt.d2h), "synStreamSynchronize");
+        check(synStreamSynchronize(rt.stream), "synStreamSynchronize");
+
         std::memcpy(c, hostC, bytes);
     } catch (...) {
         cleanup();
