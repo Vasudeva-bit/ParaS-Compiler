@@ -382,34 +382,37 @@ std::vector<sycl::device> detect_amd_gpus() {
 }
 
 std::vector<sycl::device> detect_gaudi2_accelerators() {
-    std::vector<sycl::device> out;
+    static const auto cached = []() {
+        std::vector<sycl::device> out;
 #ifdef __linux__
-    std::vector<std::string> lines;
-    if (!run_cmd_lines_cached("hl-smi -Q name --format=csv,noheader,nounits 2>/dev/null", lines) ||
-        lines.empty()) {
-        lines.clear();
-        if (!run_cmd_lines_cached("hl-smi -L 2>/dev/null", lines) || lines.empty()) {
+        std::vector<std::string> lines;
+        if (!run_cmd_lines_cached("hl-smi -Q name --format=csv,noheader,nounits 2>/dev/null", lines) ||
+            lines.empty()) {
             lines.clear();
-            if (!run_cmd_lines_cached("/usr/bin/hl-smi -Q name --format=csv,noheader,nounits 2>/dev/null", lines) ||
-                lines.empty()) {
+            if (!run_cmd_lines_cached("hl-smi -L 2>/dev/null", lines) || lines.empty()) {
                 lines.clear();
-                run_cmd_lines_cached("/usr/bin/hl-smi -L 2>/dev/null", lines);
+                if (!run_cmd_lines_cached("/usr/bin/hl-smi -Q name --format=csv,noheader,nounits 2>/dev/null", lines) ||
+                    lines.empty()) {
+                    lines.clear();
+                    run_cmd_lines_cached("/usr/bin/hl-smi -L 2>/dev/null", lines);
+                }
             }
         }
-    }
-    for (const auto& raw : lines) {
-        const std::string name = to_lower(raw);
-        if (name.find("gaudi 2") == std::string::npos &&
-            name.find("gaudi2") == std::string::npos && name.find("hl-225") == std::string::npos)
-            continue;
-        out.emplace_back(::paras_extension::device_ctor_tag{}, "Intel Gaudi 2", "Intel Gaudi",
-                         "unknown", "SynapseAI", 24, 1024,
-                         96ULL * 1024ULL * 1024ULL * 1024ULL,
-                         sycl::info::local_mem_type::local, false, false, true,
-                         static_cast<int>(out.size()), false);
-    }
+        for (const auto& raw : lines) {
+            const std::string name = to_lower(raw);
+            if (name.find("gaudi 2") == std::string::npos &&
+                name.find("gaudi2") == std::string::npos && name.find("hl-225") == std::string::npos)
+                continue;
+            out.emplace_back(::paras_extension::device_ctor_tag{}, "Intel Gaudi 2", "Intel Gaudi",
+                             "unknown", "SynapseAI", 24, 1024,
+                             96ULL * 1024ULL * 1024ULL * 1024ULL,
+                             sycl::info::local_mem_type::local, false, false, true,
+                             static_cast<int>(out.size()), false);
+        }
 #endif
-    return out;
+        return out;
+    }();
+    return cached;
 }
 
 std::vector<sycl::device> detect_all_gpus() {

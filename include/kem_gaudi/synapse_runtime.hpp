@@ -10,6 +10,11 @@
 #include <synapse_api.h>
 #include <sycl/event.hpp>
 
+#if defined(PARAS_GAUDI_HOST_FALLBACK)
+#include <sycl/queue.hpp>
+#include <sycl/device_selector.hpp>
+#endif
+
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -23,11 +28,18 @@ namespace paras_gaudi {
 template <typename> inline constexpr bool dependent_false_v = false;
 
 template <typename Kernel>
-[[noreturn]] inline sycl::event unsupported_kernel(Kernel&&) {
+inline sycl::event unsupported_kernel(Kernel&& k) {
+#if defined(PARAS_GAUDI_HOST_FALLBACK)
+    sycl::queue host_q{sycl::cpu_selector_v};
+    host_q.submit(std::forward<Kernel>(k));
+    host_q.wait();
+    return sycl::event{sycl::backend::gaudi};
+#else
     static_assert(dependent_false_v<Kernel>,
                   "Gaudi v0.1 supports only 1D float vector-add kernels of the form "
                   "out[i] = in_a[i] + in_b[i].");
     while (true) {}
+#endif
 }
 
 inline void check(synStatus status, const char* operation) {
@@ -81,7 +93,11 @@ inline Runtime& runtime() {
     return instance;
 }
 
-inline sycl::event add_f32(std::size_t count, const float* a, const float* b, float* c) {
+inline sycl::event add_f32(std::size_t count, const float* a, const float* b, float* c, float alpha = 1.0f) {
+    if (alpha != 1.0f) {
+        throw std::runtime_error("paras_gaudi::add_f32: alpha != 1.0 is not supported on Gaudi v0.1 (got alpha=" +
+                                 std::to_string(alpha) + ")");
+    }
     if (count == 0)
         return sycl::event{sycl::backend::gaudi};
     if (!a || !b || !c)

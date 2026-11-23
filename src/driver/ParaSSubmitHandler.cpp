@@ -108,6 +108,7 @@ bool isFloatElementPointer(clang::QualType type, bool allowConstPointee = true) 
 
 bool isVectorAddKernel(const clang::CallExpr* parallelFor, std::string& count,
                        std::string& inputA, std::string& inputB, std::string& output,
+                       std::string& alphaStr,
                        const clang::SourceManager& SM, const clang::LangOptions& LangOpts) {
     if (!parallelFor || parallelFor->getNumArgs() < 2)
         return false;
@@ -144,8 +145,29 @@ bool isVectorAddKernel(const clang::CallExpr* parallelFor, std::string& count,
         return false;
 
     const auto* addA = llvm::dyn_cast_or_null<clang::ArraySubscriptExpr>(stripExpr(sum->getLHS()));
-    const auto* addB = llvm::dyn_cast_or_null<clang::ArraySubscriptExpr>(stripExpr(sum->getRHS()));
+    const clang::ArraySubscriptExpr* addB = nullptr;
+    const clang::Expr* scalarExpr = nullptr;
+    const auto* rhs = stripExpr(sum->getRHS());
+
+    if (auto* directB = llvm::dyn_cast_or_null<clang::ArraySubscriptExpr>(rhs)) {
+        addB = directB;
+    } else if (auto* mul = llvm::dyn_cast_or_null<clang::BinaryOperator>(rhs);
+               mul && mul->getOpcode() == clang::BO_Mul) {
+        auto* l = llvm::dyn_cast_or_null<clang::ArraySubscriptExpr>(stripExpr(mul->getLHS()));
+        auto* r = llvm::dyn_cast_or_null<clang::ArraySubscriptExpr>(stripExpr(mul->getRHS()));
+        if (l && !r) {
+            addB = l;
+            scalarExpr = stripExpr(mul->getRHS());
+        } else if (r && !l) {
+            addB = r;
+            scalarExpr = stripExpr(mul->getLHS());
+        }
+    }
+
     if (!addA || !addB)
+        return false;
+
+    if (scalarExpr && simpleIndexRef(scalarExpr, paramDecl))
         return false;
     const auto* aRef = simpleArrayBase(addA->getBase());
     const auto* bRef = simpleArrayBase(addB->getBase());
@@ -175,6 +197,17 @@ bool isVectorAddKernel(const clang::CallExpr* parallelFor, std::string& count,
         countStr = "(" + rangeRef->getDecl()->getNameAsString() + ")[0]";
     } else {
         return false;
+    }
+
+    if (scalarExpr) {
+        clang::CharSourceRange scalarRange =
+            clang::CharSourceRange::getTokenRange(scalarExpr->getSourceRange());
+        llvm::StringRef scalarText = clang::Lexer::getSourceText(scalarRange, SM, LangOpts);
+        if (scalarText.empty())
+            return false;
+        alphaStr = "(float)(" + scalarText.str() + ")";
+    } else {
+        alphaStr = "1.0f";
     }
 
     count = countStr;
@@ -304,15 +337,15 @@ void SubmitFunctionCallback::run(const clang::ast_matchers::MatchFinder::MatchRe
 
         const bool gaudiTarget = !bkend_target.empty() && bkend_target[0] == "gaudi";
         if (gaudiTarget) {
-            std::string count, inputA, inputB, output;
+            std::string count, inputA, inputB, output, alphaStr;
             const auto* kernelCall =
                 result.Nodes.getNodeAs<clang::CallExpr>("parallelforCall");
             const bool supported =
-                isVectorAddKernel(kernelCall, count, inputA, inputB, output, *SM, langopts);
+                isVectorAddKernel(kernelCall, count, inputA, inputB, output, alphaStr, *SM, langopts);
             std::string replacement;
             if (supported) {
                 replacement = "::paras_gaudi::add_f32(" + count + ", " + inputA + ", " +
-                              inputB + ", " + output + ")";
+                              inputB + ", " + output + ", " + alphaStr + ")";
                 parasLog() << "[ParaS] lowered Gaudi float vector addition to SynapseAI add_fwd_f32\n";
             } else {
                 replacement = "::paras_gaudi::unsupported_kernel(" +

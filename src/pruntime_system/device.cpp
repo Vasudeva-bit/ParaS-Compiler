@@ -24,6 +24,7 @@
 #include "sycl/aspect.hpp"
 
 #include <thread>
+#include <cstdlib>
 
 #ifdef __linux__
 #include <sys/sysinfo.h>
@@ -156,6 +157,12 @@ std::vector<device> device::get_devices(info::device_type type) {
     if (type == info::device_type::gpu || type == info::device_type::all) {
         auto gpus = ::paras_extension::detect_all_gpus();
         out.insert(out.end(), gpus.begin(), gpus.end());
+        if (type == info::device_type::gpu && gpus.empty()) {
+            if (std::getenv("PARAS_GAUDI_AS_GPU")) {
+                auto accelerators = ::paras_extension::detect_gaudi2_accelerators();
+                out.insert(out.end(), accelerators.begin(), accelerators.end());
+            }
+        }
     }
 
     if (type == info::device_type::accelerator || type == info::device_type::all) {

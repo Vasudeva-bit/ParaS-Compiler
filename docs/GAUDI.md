@@ -40,3 +40,45 @@ Gaudi hardware for an SDK-version or device execution check.
 Each supported submission currently builds and compiles a graph for that operation
 and synchronizes before returning. This is a correctness-oriented initial path, not
 an asynchronous queue implementation.
+
+## PyTorch / Torch_ParaS Integration (v0.1 Prototype)
+
+To run PyTorch tensor addition on Intel Gaudi 2 through `torch_paras`:
+
+1. **Device Discovery**: Set `export PARAS_GAUDI_AS_GPU=1` so `torch_paras` detects the Gaudi 2 accelerator as `paras:0`.
+2. **Unsupported Kernel Fallback**: When compiling `torch_paras`, optionally define `-DPARAS_GAUDI_HOST_FALLBACK` to route any auxiliary SYCL kernels outside of vector addition to the CPU host queue.
+3. **Alpha Guard**: In `c[i] = a[i] + alpha * b[i]`, `alpha=1.0` (standard tensor `x + y`) executes on Gaudi 2 via `add_fwd_f32`. Non-unit `alpha` values raise a descriptive `std::runtime_error` rather than silently calculating incorrect results.
+
+### Sample Verification Script:
+
+```python
+import os
+import torch
+import torch_paras
+
+# Ensure Gaudi is reported to torch_paras as device 0
+# export PARAS_GAUDI_AS_GPU=1
+
+# 1. Prepare inputs on CPU
+x_cpu = torch.randn(1024, dtype=torch.float32)
+y_cpu = torch.randn(1024, dtype=torch.float32)
+
+# 2. Transfer to Gaudi (paras:0)
+x = x_cpu.to("paras:0")
+y = y_cpu.to("paras:0")
+
+# 3. Execute addition on Intel Gaudi 2
+z = x + y
+
+# 4. Verify against CPU ground truth
+z_cpu = z.cpu()
+expected = x_cpu + y_cpu
+print("Gaudi 2 vs CPU allclose:", torch.allclose(z_cpu, expected, atol=1e-5))
+
+# 5. Verify alpha guard raises on non-1.0 alpha
+try:
+    z_alpha = torch.add(x, y, alpha=2.0)
+    print("ERROR: alpha=2.0 should have raised!")
+except RuntimeError as e:
+    print("SUCCESS: alpha=2.0 correctly raised:", e)
+```
