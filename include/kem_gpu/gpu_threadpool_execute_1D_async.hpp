@@ -28,8 +28,8 @@
 #include <cuda_runtime.h>
 #elif (PARAS_HIP_BACKEND)
 #include <hip/hip_runtime.h>
-// #elif (PARAS_GAUDI_BACKEND)
-// #include "synapse_runtime.hpp" // via accelerator selector logic?
+// Note: Intel Gaudi (PARAS_GAUDI_BACKEND) does not use this GPU threadpool.
+// Gaudi compiles as host C++ and lowers directly via AST rewriting to ::paras_gaudi::add_f32.
 #endif
 
 template <typename Func>

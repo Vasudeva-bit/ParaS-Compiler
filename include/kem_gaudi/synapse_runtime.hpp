@@ -2,7 +2,7 @@
  * Copyright (c) 2026 Centre for Development of Advanced Computing (C-DAC)
  * SPDX-License-Identifier: Apache-2.0
 
- Authors = [Vasudeva-bit, Codex]; Auditors = [Vasudeva-bit]
+ Authors = [Vasudeva-bit, AI (Codex, Anti-Gravity models, GitHub Copilot via VSCode)]; Auditors = [Vasudeva-bit]
  */
 #ifndef __PARAS_GAUDI_SYNAPSE_RUNTIME_HPP__
 #define __PARAS_GAUDI_SYNAPSE_RUNTIME_HPP__

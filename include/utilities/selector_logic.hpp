@@ -96,14 +96,20 @@ inline sycl::device select_device_with_selector(const SelectorV& selector_v) {
         return *best;
     }
 
-    // Does the code changes for gaudi 2 support, i.e. v0.1, follow accelerator_selector_v?
-    // if constexpr (std::is_same_v<std::decay_t<SelectorV>,
-    //                              std::decay_t<decltype(sycl::accelerator_selector_v)>>) {
-    //     if constexpr (has_flag) {
-    //         paras_selector_error("accelerator_selector_v used but -parasdevice flag is present");
-    //     }
-    //     return best ? *best : sycl::device{};
-    // }
+    if constexpr (std::is_same_v<std::decay_t<SelectorV>,
+                                 std::decay_t<decltype(sycl::accelerator_selector_v)>>) {
+#if PARASDEVICE == 1 || PARASDEVICE == 2
+        paras_selector_error("accelerator_selector_v used but GPU -parasdevice flag is present");
+#elif PARASDEVICE == 3
+        if (!best) {
+            return sycl::device(device_ctor_tag{}, "No Intel Gaudi device present", "Intel Gaudi", "",
+                                "", 0, 0, 0, sycl::info::local_mem_type::none, false, false, true, -1,
+                                false);
+        }
+        return *best;
+#endif
+        return best ? *best : sycl::device{};
+    }
 
 #if PARASDEVICE == 3
     if (!best) {
